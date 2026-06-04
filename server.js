@@ -17,6 +17,7 @@ const pool = new Pool({
 
 const SPACE = "default";              // single household namespace
 const TOKEN = process.env.APP_TOKEN || ""; // optional shared access code
+let dbReady = false;                  // flips true once the kv table exists
 
 async function init() {
   await pool.query(`CREATE TABLE IF NOT EXISTS kv (
@@ -26,6 +27,21 @@ async function init() {
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (space, k)
   )`);
+}
+
+// Connect to Postgres in the background, retrying with backoff instead of
+// crashing the process. A transient DB (Railway brings it up moments after the
+// app) or a slightly-late DATABASE_URL no longer kills the deploy.
+async function initWithRetry(attempt = 1) {
+  try {
+    await init();
+    dbReady = true;
+    console.log("[spa] database ready");
+  } catch (e) {
+    const delay = Math.min(30000, 1000 * 2 ** attempt);
+    console.error(`[spa] DB init failed (attempt ${attempt}): ${e.message}. Retrying in ${Math.round(delay / 1000)}s`);
+    setTimeout(() => initWithRetry(attempt + 1), delay).unref?.();
+  }
 }
 
 function auth(req, res, next) {
@@ -80,6 +96,9 @@ api.delete("/:key", async (req, res, next) => {
 
 app.use("/api/kv", api);
 
+// health check (before the SPA catch-all so it returns JSON, not index.html)
+app.get("/healthz", (req, res) => res.json({ ok: true, db: dbReady }));
+
 // serve the frontend
 app.use(express.static(path.join(__dirname, "public")));
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
@@ -87,6 +106,19 @@ app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.ht
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: "server error" }); });
 
 const port = process.env.PORT || 3000;
-init()
-  .then(() => app.listen(port, () => console.log("Spa Water Helper listening on " + port)))
-  .catch((e) => { console.error("DB init failed:", e); process.exit(1); });
+
+// Start serving immediately. The frontend has an offline localStorage mirror, so the
+// app stays usable even before (or entirely without) a database — and Railway sees a
+// healthy listening process instead of a crash loop.
+app.listen(port, () => console.log("Spa Water Helper listening on " + port));
+
+if (!process.env.DATABASE_URL) {
+  console.error(
+    "[spa] DATABASE_URL is not set — cloud sync is OFF (the app falls back to each\n" +
+    "      device's localStorage). Fix on Railway: add a PostgreSQL database, then in\n" +
+    "      THIS service's Variables add a Reference to DATABASE_URL from the Postgres\n" +
+    "      service, and redeploy."
+  );
+} else {
+  initWithRetry();
+}
