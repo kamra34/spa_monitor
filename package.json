@@ -1,12 +1,27 @@
 {
   "name": "spa-water-helper-cloud",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "commonjs",
   "engines": { "node": ">=18" },
-  "scripts": { "start": "node server.js" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
   "dependencies": {
     "express": "^4.19.2",
     "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lucide-react": "^0.451.0",
+    "vite": "^5.4.10",
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite-plugin-singlefile": "^2.0.0",
+    "vitest": "^2.1.4"
   }
 }

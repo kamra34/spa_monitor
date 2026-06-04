@@ -6,11 +6,18 @@ tiny Express API (`/api/kv`) backed by a `kv` table in Postgres, with a
 localStorage mirror so it still works if the network drops by the tub.
 
 ```
-spa-cloud/
-├── server.js          # Express API + serves the app (one Railway service)
-├── package.json       # start script + deps (express, pg)
-├── public/index.html  # the app (self-contained, talks to /api/kv)
-├── .env.example       # the env vars Railway needs
+spa_monitor/
+├── server.js            # Express API + serves the app (one Railway service)
+├── package.json         # scripts + runtime deps (express, pg) + dev toolchain (vite, react)
+├── nixpacks.toml        # tells Railway to serve the committed build, not rebuild it
+├── index.html           # Vite HTML entry (dev/build template)
+├── src/                 # React source — the real app, edit here
+│   ├── SpaWaterHelper.jsx · entry.jsx · storage.js · styles.css
+│   ├── lib/             # pure logic: chemistry, dosing, plan, verdict, childGuide, strips
+│   ├── components/      # UI primitives + StripPad
+│   └── tabs/            # the five tabs
+├── public/index.html    # BUILT, self-contained app (committed; served in production)
+├── env.example          # the env vars Railway needs
 └── .gitignore
 ```
 
@@ -56,6 +63,18 @@ npm install
 DATABASE_URL=postgresql://localhost:5432/spadb npm start
 # open http://localhost:3000
 ```
+
+## Develop the frontend
+The UI is a **Vite + React** app in `src/`, built into the single self-contained
+`public/index.html` that the server serves.
+```bash
+npm install
+npm run dev      # http://localhost:5173 — hot reload while you edit src/
+npm test         # Vitest — the safety-critical chemistry / dosing / plan logic
+npm run build    # rebuild public/index.html
+```
+After changing anything in `src/`, run `npm run build` and **commit the new
+`public/index.html`** — Railway serves the committed file and does not rebuild.
 
 ## How your data is stored
 - One row per key in the `kv` table (`spa:settings`, `spa:state`) under a single

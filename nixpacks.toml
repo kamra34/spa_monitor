@@ -1,0 +1,14 @@
+# Railway / Nixpacks build config.
+#
+# The frontend is a Vite build that is COMMITTED to public/index.html (a single
+# self-contained file). Railway should NOT rebuild it — the runtime only needs the
+# server's dependencies (express + pg) and `npm start`. This keeps deploys fast and
+# avoids needing the dev toolchain (vite/react) in the production image.
+#
+# To change the UI: edit src/, run `npm run build`, commit the new public/index.html.
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "npm start"
