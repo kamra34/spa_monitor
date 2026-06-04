@@ -365,6 +365,8 @@ body {
   display: grid; place-items: center; transition: transform 0.12s ease;
 }
 .iconbtn:active { transform: scale(0.9); }
+.iconbtn .spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
   .app-bg::before, .app-bg::after { animation: none; }

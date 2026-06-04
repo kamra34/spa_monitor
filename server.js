@@ -100,8 +100,13 @@ app.use("/api/kv", api);
 app.get("/healthz", (req, res) => res.json({ ok: true, db: dbReady }));
 
 // serve the frontend
-app.use(express.static(path.join(__dirname, "public")));
-app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, filePath) => { if (filePath.endsWith(".html")) res.setHeader("Cache-Control", "no-cache"); },
+}));
+app.get("*", (req, res) => {
+  res.setHeader("Cache-Control", "no-cache"); // always revalidate the app shell so a reload picks up new deploys
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: "server error" }); });
 

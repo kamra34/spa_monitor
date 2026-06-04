@@ -41,6 +41,7 @@ export default function SpaWaterHelper() {
   const [log, setLog] = useState({ events: [] })
   const [tab, setTab] = useState('test')
   const [offline, setOffline] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [theme, setTheme] = useState(() => {
     try {
       return localStorage.getItem('spaHelper:theme') ||
@@ -48,33 +49,77 @@ export default function SpaWaterHelper() {
     } catch { return 'light' }
   })
   const ready = useRef(false)
+  const syncingRef = useRef(false)
+  const lastSettingsRaw = useRef(null)
+  const lastStateRaw = useRef(null)
 
-  // Load once (migrating the legacy { log, lastChange } shape into events on the way in).
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try {
-        const [s, st] = await Promise.all([
-          window.storage.get('spa:settings'),
-          window.storage.get('spa:state'),
-        ])
-        if (!alive) return
-        if (s?.value) { try { setSettings(normalizeSettings(JSON.parse(s.value))) } catch { /* keep defaults */ } }
-        if (st?.value) { try { setLog(migrateState(JSON.parse(st.value))) } catch { /* keep empty */ } }
-      } finally {
-        ready.current = true // only persist AFTER the initial load (don't clobber cloud with defaults)
+  // Pull the latest from the cloud into state. Safe to call any time: when online it
+  // reads the server, when offline window.storage falls back to the localStorage mirror
+  // (so a stale server can never clobber unsynced local data). Only applies values that
+  // actually changed, so a single-device re-sync is a no-op.
+  const syncFromCloud = async () => {
+    if (syncingRef.current) return
+    syncingRef.current = true
+    setSyncing(true)
+    try {
+      const [s, st] = await Promise.all([
+        window.storage.get('spa:settings'),
+        window.storage.get('spa:state'),
+      ])
+      if (s?.value && s.value !== lastSettingsRaw.current) {
+        lastSettingsRaw.current = s.value
+        try { setSettings(normalizeSettings(JSON.parse(s.value))) } catch { /* keep current */ }
       }
-    })()
-    return () => { alive = false }
+      if (st?.value && st.value !== lastStateRaw.current) {
+        lastStateRaw.current = st.value
+        try { setLog(migrateState(JSON.parse(st.value))) } catch { /* keep current */ }
+      }
+    } finally {
+      ready.current = true // only persist AFTER the first load (don't clobber cloud with defaults)
+      syncingRef.current = false
+      setSyncing(false)
+    }
+  }
+
+  // Initial load + re-sync whenever the app returns to the foreground. On an iOS home-screen
+  // app there's no pull-to-refresh, so this keeps data fresh when you reopen it.
+  useEffect(() => {
+    syncFromCloud()
+    const onForeground = () => { if (document.visibilityState === 'visible') syncFromCloud() }
+    document.addEventListener('visibilitychange', onForeground)
+    window.addEventListener('pageshow', onForeground)
+    return () => {
+      document.removeEventListener('visibilitychange', onForeground)
+      window.removeEventListener('pageshow', onForeground)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { if (ready.current) window.storage.set('spa:settings', JSON.stringify(settings)) }, [settings])
-  useEffect(() => { if (ready.current) window.storage.set('spa:state', JSON.stringify(log)) }, [log])
+  useEffect(() => {
+    if (!ready.current) return
+    const raw = JSON.stringify(settings)
+    lastSettingsRaw.current = raw
+    window.storage.set('spa:settings', raw)
+  }, [settings])
+  useEffect(() => {
+    if (!ready.current) return
+    const raw = JSON.stringify(log)
+    lastStateRaw.current = raw
+    window.storage.set('spa:state', raw)
+  }, [log])
   useEffect(() => subscribeOffline(setOffline), [])
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     try { localStorage.setItem('spaHelper:theme', theme) } catch { /* ignore */ }
   }, [theme])
+
+  // Refresh button: when online, a full reload (also picks up a new app version, the
+  // closest thing to "close & reopen"). When offline, a soft re-sync that can't blank the
+  // screen — it just re-reads the on-device data.
+  const refresh = () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { syncFromCloud(); return }
+    window.location.reload()
+  }
 
   const setSetting = (key, val) => setSettings((s) => ({ ...s, [key]: val }))
   const setReading = (field, val) => setReadings((r) => ({ ...r, [field]: val }))
@@ -126,13 +171,18 @@ export default function SpaWaterHelper() {
                 <div className="eyebrow">Lay-Z-Spa Helsinki · {settings.volume} L</div>
                 <h1 className="app-title">Water care helper</h1>
               </div>
-              <button
-                className="iconbtn"
-                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-              >
-                {theme === 'dark' ? <Icon.sun size={20} /> : <Icon.moon size={20} />}
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="iconbtn" aria-label="Refresh" title="Refresh" onClick={refresh}>
+                  <Icon.sync size={19} className={syncing ? 'spin' : undefined} />
+                </button>
+                <button
+                  className="iconbtn"
+                  aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                  onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+                >
+                  {theme === 'dark' ? <Icon.sun size={20} /> : <Icon.moon size={20} />}
+                </button>
+              </div>
             </div>
             <div className="app-sub">Test → follow the steps in order → re-test.</div>
           </div>

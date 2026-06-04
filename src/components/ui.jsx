@@ -3,7 +3,7 @@ import {
   Droplet, Droplets, Waves, FlaskConical, ShieldCheck, TriangleAlert, Check, X,
   Sun, Moon, Snowflake, Flame, Baby, ListChecks, RefreshCw, Sparkles,
   SlidersHorizontal, Settings2, Thermometer, Plus, Minus, Info, ArrowRight,
-  CalendarDays, Trash2, Save, Beaker, CircleDot, History, Pencil, Clock,
+  CalendarDays, Trash2, Save, Beaker, CircleDot, History, Pencil, Clock, RotateCw,
 } from 'lucide-react'
 import { daysSince } from '../lib/format.js'
 import { WATER_CHANGE_DUE_DAYS } from '../lib/constants.js'
@@ -14,7 +14,7 @@ export const Icon = {
   baby: Baby, checks: ListChecks, refresh: RefreshCw, sparkles: Sparkles, sliders: SlidersHorizontal,
   settings: Settings2, temp: Thermometer, plus: Plus, minus: Minus, info: Info, arrow: ArrowRight,
   calendar: CalendarDays, trash: Trash2, save: Save, beaker: Beaker, dot: CircleDot,
-  history: History, edit: Pencil, clock: Clock,
+  history: History, edit: Pencil, clock: Clock, sync: RotateCw,
 }
 
 // tone → the emblem icon used by verdict + child cards
