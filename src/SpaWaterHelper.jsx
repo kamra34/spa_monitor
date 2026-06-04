@@ -1,27 +1,28 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { subscribeOffline } from './storage.js'
-import { DEFAULT_SETTINGS, DEFAULT_STATE, LOG_LIMIT } from './lib/constants.js'
+import { DEFAULT_SETTINGS } from './lib/constants.js'
 import {
   shockDose, dailyDose, scaleDose, clarifierStartDose, clarifierWeeklyDose,
   flushDose, freshFillChlorine, perUnit, chlorineToTarget,
 } from './lib/dosing.js'
-import { hasAnyReading } from './lib/plan.js'
+import { migrateState, makeReadingEvent, makeRefillEvent } from './lib/events.js'
 import { Icon } from './components/ui.jsx'
 import TestTab from './tabs/TestTab.jsx'
 import RoutineTab from './tabs/RoutineTab.jsx'
 import FreshFillTab from './tabs/FreshFillTab.jsx'
 import DosesTab from './tabs/DosesTab.jsx'
 import SetupTab from './tabs/SetupTab.jsx'
+import HistoryTab from './tabs/HistoryTab.jsx'
 
 const EMPTY_READINGS = { fc: null, ph: null, ta: null, totalCl: null, hardness: null, cya: null }
-const nowISO = () => new Date().toISOString()
 
 const TABS = [
-  { id: 'test', label: 'Test & fix', icon: Icon.flask, C: TestTab },
+  { id: 'test', label: 'Test', icon: Icon.flask, C: TestTab },
   { id: 'routine', label: 'Routine', icon: Icon.checks, C: RoutineTab },
-  { id: 'fresh', label: 'Fresh fill', icon: Icon.refresh, C: FreshFillTab },
+  { id: 'fresh', label: 'Fresh', icon: Icon.refresh, C: FreshFillTab },
   { id: 'doses', label: 'Doses', icon: Icon.beaker, C: DosesTab },
   { id: 'setup', label: 'Setup', icon: Icon.settings, C: SetupTab },
+  { id: 'history', label: 'History', icon: Icon.history, C: HistoryTab },
 ]
 
 function normalizeSettings(o) {
@@ -37,7 +38,7 @@ function normalizeSettings(o) {
 export default function SpaWaterHelper() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [readings, setReadings] = useState(EMPTY_READINGS)
-  const [appState, setAppState] = useState(DEFAULT_STATE)
+  const [log, setLog] = useState({ events: [] })
   const [tab, setTab] = useState('test')
   const [offline, setOffline] = useState(false)
   const [theme, setTheme] = useState(() => {
@@ -48,7 +49,7 @@ export default function SpaWaterHelper() {
   })
   const ready = useRef(false)
 
-  // Load once from the cloud (with localStorage mirror fallback inside window.storage).
+  // Load once (migrating the legacy { log, lastChange } shape into events on the way in).
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -59,16 +60,7 @@ export default function SpaWaterHelper() {
         ])
         if (!alive) return
         if (s?.value) { try { setSettings(normalizeSettings(JSON.parse(s.value))) } catch { /* keep defaults */ } }
-        if (st?.value) {
-          try {
-            const o = JSON.parse(st.value)
-            setAppState({
-              lastChange: o.lastChange ?? null,
-              lastTest: o.lastTest ?? null,
-              log: Array.isArray(o.log) ? o.log : [],
-            })
-          } catch { /* keep defaults */ }
-        }
+        if (st?.value) { try { setLog(migrateState(JSON.parse(st.value))) } catch { /* keep empty */ } }
       } finally {
         ready.current = true // only persist AFTER the initial load (don't clobber cloud with defaults)
       }
@@ -77,7 +69,7 @@ export default function SpaWaterHelper() {
   }, [])
 
   useEffect(() => { if (ready.current) window.storage.set('spa:settings', JSON.stringify(settings)) }, [settings])
-  useEffect(() => { if (ready.current) window.storage.set('spa:state', JSON.stringify(appState)) }, [appState])
+  useEffect(() => { if (ready.current) window.storage.set('spa:state', JSON.stringify(log)) }, [log])
   useEffect(() => subscribeOffline(setOffline), [])
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -87,12 +79,19 @@ export default function SpaWaterHelper() {
   const setSetting = (key, val) => setSettings((s) => ({ ...s, [key]: val }))
   const setReading = (field, val) => setReadings((r) => ({ ...r, [field]: val }))
   const clearReadings = () => setReadings(EMPTY_READINGS)
-  const markChange = () => setAppState((s) => ({ ...s, lastChange: nowISO() }))
-  const saveReading = () => {
-    if (!hasAnyReading(readings)) return
-    const entry = { d: nowISO(), fc: readings.fc, ph: readings.ph, ta: readings.ta, cya: readings.cya }
-    setAppState((s) => ({ ...s, lastTest: nowISO(), log: [entry, ...s.log].slice(0, LOG_LIMIT) }))
+
+  const addReading = (reading, strip) => {
+    const ev = makeReadingEvent(reading, strip)
+    setLog((s) => ({ events: [ev, ...s.events] }))
+    return ev
   }
+  const addRefill = () => {
+    const ev = makeRefillEvent()
+    setLog((s) => ({ events: [ev, ...s.events] }))
+    return ev
+  }
+  const updateEvent = (id, patch) => setLog((s) => ({ events: s.events.map((e) => (e.id === id ? { ...e, ...patch } : e)) }))
+  const deleteEvent = (id) => setLog((s) => ({ events: s.events.filter((e) => e.id !== id) }))
 
   const doses = useMemo(() => ({
     shock: shockDose(settings.fcShock, settings.volume),
@@ -109,7 +108,10 @@ export default function SpaWaterHelper() {
     clToTarget: chlorineToTarget(readings.fc, settings.targetFC, settings.fcRate, settings.volume),
   }), [settings, readings.fc])
 
-  const ctx = { settings, setSetting, readings, setReading, clearReadings, saveReading, appState, markChange, doses }
+  const ctx = {
+    settings, setSetting, readings, setReading, clearReadings, doses,
+    events: log.events, addReading, addRefill, updateEvent, deleteEvent, goTo: setTab,
+  }
   const ActiveTab = TABS.find((t) => t.id === tab).C
 
   return (
@@ -160,7 +162,7 @@ export default function SpaWaterHelper() {
                 aria-current={tab === t.id}
                 onClick={() => setTab(t.id)}
               >
-                <I size={21} />
+                <I size={20} />
                 {t.label}
               </button>
             )

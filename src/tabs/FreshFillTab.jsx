@@ -1,10 +1,23 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { GlassCard, RichText, Icon } from '../components/ui.jsx'
+import EventItem from '../components/EventItem.jsx'
 import { PRODUCTS } from '../lib/constants.js'
+import { recentByType } from '../lib/events.js'
+import { dateTime } from '../lib/format.js'
 
 export default function FreshFillTab({ ctx }) {
-  const { doses, markChange } = ctx
+  const { doses, addRefill, events, goTo } = ctx
   const P = PRODUCTS
+
+  const [flash, setFlash] = useState(null)
+  useEffect(() => {
+    if (!flash) return undefined
+    const t = setTimeout(() => setFlash(null), 5000)
+    return () => clearTimeout(t)
+  }, [flash])
+  const onLog = () => setFlash(addRefill())
+
+  const refills = recentByType(events, 'refill', 5)
 
   const steps = [
     { title: 'Fill & warm up', body: ['Fill to the line, run the pump, let it warm. Chemicals dissolve and react better in warm water.'] },
@@ -45,9 +58,30 @@ export default function FreshFillTab({ ctx }) {
         </GlassCard>
       ))}
 
-      <button className="btn btn-primary btn-block" onClick={markChange}>
-        <Icon.drop size={18} /> I just did a fresh fill — log it
+      <button className="btn btn-primary btn-block" onClick={onLog}>
+        <Icon.drop size={18} /> I just did a fresh refill — log it
       </button>
+
+      {flash && (
+        <div className="inline-note t-good">
+          <span className="ic"><Icon.check size={18} /></span>
+          <span>
+            <strong>Fresh water logged</strong> · {dateTime(flash.at)}. The change counter resets.{' '}
+            <button className="link-btn" onClick={() => goTo('history')}>View in History →</button>
+          </span>
+        </div>
+      )}
+
+      {/* ---- recent refills ---- */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+        <div className="section-title" style={{ margin: 0 }}><Icon.history size={18} /> Recent refills</div>
+        {refills.length > 0 && <button className="link-btn" onClick={() => goTo('history')}>See all →</button>}
+      </div>
+      {refills.length === 0 ? (
+        <div className="glass card muted">No refills logged yet. When you change the water, tap the button above.</div>
+      ) : (
+        refills.map((e) => <EventItem key={e.id} event={e} />)
+      )}
     </div>
   )
 }

@@ -1,29 +1,48 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import StripPad from '../components/StripPad.jsx'
+import EventItem from '../components/EventItem.jsx'
 import { GlassCard, Segmented, WaterChange, Stepper, RichText, Icon, toneIcon } from '../components/ui.jsx'
 import { PADS_CORE, PADS_EXTRA, FIELD } from '../lib/strips.js'
 import { combinedChlorine, COMBINED_CL_THRESHOLD } from '../lib/chemistry.js'
 import { entryVerdict } from '../lib/verdict.js'
 import { buildPlan, hasAnyReading } from '../lib/plan.js'
 import { childGuide, TEMP_MIN, TEMP_MAX } from '../lib/childGuide.js'
-import { shortDate } from '../lib/format.js'
+import { scopeReading, recent, lastRefillAt, STRIP_LABEL } from '../lib/events.js'
+import { dateTime } from '../lib/format.js'
 
 export default function TestTab({ ctx }) {
-  const { settings, setSetting, readings, setReading, clearReadings, saveReading, appState, markChange } = ctx
+  const { settings, setSetting, readings, setReading, clearReadings, events, addReading, addRefill, goTo } = ctx
   const childOpen = settings.childMode
-  const cc = combinedChlorine(readings.fc, readings.totalCl)
-  const verdict = entryVerdict(readings.fc, readings.ph)
+
+  // Scope to the current strip: a 3-in-1 has no total-chlorine / stabiliser / hardness pad,
+  // so those never feed the plan, verdict or a saved reading even if a stale value lingers.
+  const scoped = scopeReading(readings, settings.strip)
+  const cc = combinedChlorine(scoped.fc, scoped.totalCl)
+  const verdict = entryVerdict(scoped.fc, scoped.ph)
   const VIcon = toneIcon(verdict.tone)
-  const plan = buildPlan(readings, settings)
-  const anyReading = hasAnyReading(readings)
+  const plan = buildPlan(scoped, settings)
+  const anyReading = hasAnyReading(scoped)
+
+  const [flash, setFlash] = useState(null)
+  useEffect(() => {
+    if (!flash) return undefined
+    const t = setTimeout(() => setFlash(null), 5000)
+    return () => clearTimeout(t)
+  }, [flash])
+
+  const onSave = () => {
+    if (!hasAnyReading(scopeReading(readings, settings.strip))) return
+    setFlash(addReading(readings, settings.strip))
+  }
 
   const padView = (p) => (
     <StripPad key={p.key} pad={p} value={readings[FIELD[p.key]]} onPick={(v) => setReading(FIELD[p.key], v)} />
   )
+  const recentEvents = recent(events, 5)
 
   return (
     <div className="stack tab-enter">
-      <WaterChange lastChange={appState.lastChange} onMark={markChange} />
+      <WaterChange lastChange={lastRefillAt(events)} onMark={addRefill} />
 
       <div className="glass card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
@@ -62,9 +81,19 @@ export default function TestTab({ ctx }) {
       )}
 
       <div className="btn-row">
-        <button className="btn btn-primary btn-block" onClick={saveReading}><Icon.save size={18} /> Save this reading</button>
+        <button className="btn btn-primary btn-block" onClick={onSave}><Icon.save size={18} /> Save this reading</button>
         <button className="btn btn-ghost btn-sm" onClick={clearReadings}><Icon.trash size={16} /> Clear</button>
       </div>
+
+      {flash && (
+        <div className="inline-note t-good">
+          <span className="ic"><Icon.check size={18} /></span>
+          <span>
+            <strong>Saved</strong> · {dateTime(flash.at)} · {STRIP_LABEL[flash.strip]} reading.{' '}
+            <button className="link-btn" onClick={() => goTo('history')}>View in History →</button>
+          </span>
+        </div>
+      )}
 
       {/* ---- ordered action plan ---- */}
       <div className="section-title"><Icon.sparkles size={18} /> What to do, in order</div>
@@ -108,21 +137,15 @@ export default function TestTab({ ctx }) {
 
       {childOpen && <ChildCard temp={settings.temp} setTemp={(v) => setSetting('temp', v)} />}
 
-      {/* ---- recent readings ---- */}
-      {appState.log.length > 0 && (
-        <GlassCard className="card">
-          <div className="section-title"><Icon.calendar size={18} /> Recent readings (mg/L)</div>
-          <div style={{ marginTop: 6 }}>
-            {appState.log.map((e, i) => (
-              <div className="read-row" key={i}>
-                <span className="read-date">{shortDate(e.d)}</span>
-                <span className="read-vals">
-                  TA {e.ta ?? '–'} · pH {e.ph ?? '–'} · Cl {e.fc ?? '–'}{e.cya != null ? ` · Stab ${e.cya}` : ''}
-                </span>
-              </div>
-            ))}
+      {/* ---- recent activity ---- */}
+      {recentEvents.length > 0 && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div className="section-title" style={{ margin: 0 }}><Icon.clock size={18} /> Recent activity</div>
+            <button className="link-btn" onClick={() => goTo('history')}>See all →</button>
           </div>
-        </GlassCard>
+          {recentEvents.map((e) => <EventItem key={e.id} event={e} />)}
+        </>
       )}
     </div>
   )
